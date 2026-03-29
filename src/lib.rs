@@ -62,6 +62,6 @@ pub(crate) fn barrett_reduce(a: i64) -> i32 {
 
 #[inline(always)]
 pub(crate) fn freeze(a: i32) -> i32 {
-    let a = a % KYBER_Q;
-    a + ((a >> 31) & KYBER_Q)
+    let a = a.wrapping_rem(KYBER_Q);
+    a.wrapping_add((a >> 31) & KYBER_Q)
 }

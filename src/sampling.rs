@@ -14,6 +14,9 @@ fn load32(x: &[u8]) -> u32 {
 }
 
 impl Poly {
+    /// Sample from centered binomial distribution with eta=2
+    /// 
+    /// Uses 128 bytes of random input to generate 256 coefficients
     pub fn cbd_eta2(&mut self, buf: &[u8; 128]) {
         for i in 0..KYBER_N / 8 {
             let t = load32(&buf[4 * i..]);
@@ -28,6 +31,9 @@ impl Poly {
         }
     }
 
+    /// Sample from centered binomial distribution with eta=3
+    /// 
+    /// Uses 192 bytes of random input to generate 256 coefficients
     pub fn cbd_eta3(&mut self, buf: &[u8; 192]) {
         for i in 0..KYBER_N / 4 {
             let t = load24(&buf[3 * i..]);
@@ -45,12 +51,14 @@ impl Poly {
         }
     }
 
+    /// Generate noise polynomial from seed using eta=2
     pub fn get_noise_eta2(&mut self, seed: &[u8], nonce: u8) {
         let mut buf = [0u8; 128];
         prf(&mut buf, seed, nonce);
         self.cbd_eta2(&buf);
     }
 
+    /// Generate noise polynomial from seed with specified eta
     pub fn get_noise_eta1(&mut self, eta: u32, seed: &[u8], nonce: u8) {
         match eta {
             2 => {
@@ -67,6 +75,7 @@ impl Poly {
         }
     }
 
+    /// Sample polynomial uniformly from seed using rejection sampling
     pub fn uniform(&mut self, seed: &[u8], nonce: u8) {
         let mut buf = [0u8; 512];
         let mut ctr = 0;
@@ -112,9 +121,11 @@ fn xof(out: &mut [u8], seed: &[u8], nonce: u8) {
     shake256(out, &ext_seed);
 }
 
+/// SHAKE256 extendable output function (placeholder implementation)
+/// 
+/// Note: This is a simplified implementation for demonstration purposes.
+/// A production implementation should use a proper SHAKE256 implementation.
 pub fn shake256(out: &mut [u8], in_: &[u8]) {
-    use crate::random::CryptoRng;
-    
     #[cfg(feature = "std")]
     {
         use std::collections::hash_map::DefaultHasher;
@@ -141,6 +152,10 @@ pub fn shake256(out: &mut [u8], in_: &[u8]) {
     }
 }
 
+/// SHA3-256 hash function (placeholder implementation)
+/// 
+/// Note: This is a simplified implementation for demonstration purposes.
+/// A production implementation should use a proper SHA3-256 implementation.
 pub fn sha3_256(out: &mut [u8; 32], in_: &[u8]) {
     #[cfg(feature = "std")]
     {
@@ -164,6 +179,10 @@ pub fn sha3_256(out: &mut [u8; 32], in_: &[u8]) {
     }
 }
 
+/// SHA3-512 hash function (placeholder implementation)
+/// 
+/// Note: This is a simplified implementation for demonstration purposes.
+/// A production implementation should use a proper SHA3-512 implementation.
 pub fn sha3_512(out: &mut [u8; 64], in_: &[u8]) {
     #[cfg(feature = "std")]
     {
@@ -195,6 +214,7 @@ pub fn sha3_512(out: &mut [u8; 64], in_: &[u8]) {
     }
 }
 
+/// Key derivation function using SHAKE256
 pub fn kdf(out: &mut [u8], in_: &[u8]) {
     shake256(out, in_);
 }

@@ -4,8 +4,13 @@ use crate::{KYBER_N, KYBER_Q};
 use crate::{barrett_reduce, freeze};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+/// A polynomial with coefficients in Z_q.
+/// 
+/// Represents a polynomial of degree less than KYBER_N (256) with coefficients
+/// in the range [0, KYBER_Q-1] where KYBER_Q = 3329.
 #[derive(Clone, Debug, Zeroize, ZeroizeOnDrop)]
 pub struct Poly {
+    /// Polynomial coefficients (256 coefficients)
     pub coeffs: [i16; KYBER_N],
 }
 
@@ -16,38 +21,44 @@ impl Default for Poly {
 }
 
 impl Poly {
+    /// Create a new zero polynomial
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Apply Barrett reduction to all coefficients
     #[inline(always)]
     pub fn reduce(&mut self) {
-        for i in 0..KYBER_N {
-            self.coeffs[i] = barrett_reduce(self.coeffs[i] as i64) as i16;
+        for coeff in self.coeffs.iter_mut() {
+            *coeff = barrett_reduce(*coeff as i64) as i16;
         }
     }
 
+    /// Reduce all coefficients to the canonical range [0, Q-1]
     #[inline(always)]
     pub fn freeze(&mut self) {
-        for i in 0..KYBER_N {
-            self.coeffs[i] = freeze(self.coeffs[i] as i32) as i16;
+        for coeff in self.coeffs.iter_mut() {
+            *coeff = freeze(*coeff as i32) as i16;
         }
     }
 
+    /// Add another polynomial to this one in place
     #[inline(always)]
     pub fn add_assign(&mut self, other: &Poly) {
-        for i in 0..KYBER_N {
-            self.coeffs[i] += other.coeffs[i];
+        for (a, b) in self.coeffs.iter_mut().zip(other.coeffs.iter()) {
+            *a = a.wrapping_add(*b);
         }
     }
 
+    /// Subtract another polynomial from this one in place
     #[inline(always)]
     pub fn sub_assign(&mut self, other: &Poly) {
-        for i in 0..KYBER_N {
-            self.coeffs[i] -= other.coeffs[i];
+        for (a, b) in self.coeffs.iter_mut().zip(other.coeffs.iter()) {
+            *a = a.wrapping_sub(*b);
         }
     }
 
+    /// Deserialize a polynomial from a byte array (384 bytes)
     #[inline(always)]
     pub fn from_bytes(bytes: &[u8]) -> Self {
         debug_assert_eq!(bytes.len(), 384);
@@ -64,6 +75,7 @@ impl Poly {
         p
     }
 
+    /// Serialize the polynomial to a byte array (384 bytes)
     #[inline(always)]
     pub fn to_bytes(&self) -> [u8; 384] {
         let mut bytes = [0u8; 384];
@@ -79,6 +91,9 @@ impl Poly {
         bytes
     }
 
+    /// Compress the polynomial using d bits per coefficient
+    /// 
+    /// Returns a byte array of 128 bytes containing the compressed coefficients.
     pub fn compress(&self, d: u32) -> [u8; 128] {
         let mut bytes = [0u8; 128];
         let shift = 1i64 << d;
@@ -154,6 +169,7 @@ impl Poly {
         bytes
     }
 
+    /// Decompress a polynomial from a byte array using d bits per coefficient
     pub fn decompress(&mut self, bytes: &[u8], d: u32) {
         let shift = (1i64 << d) as i64;
         
@@ -217,6 +233,7 @@ impl Poly {
         }
     }
 
+    /// Convert a message to polynomial representation
     pub fn to_msg(msg: &mut [u8; 32]) {
         for i in 0..32 {
             let mut t = 0i64;
@@ -227,6 +244,7 @@ impl Poly {
         }
     }
 
+    /// Convert polynomial to message representation
     pub fn from_msg(&mut self, msg: &[u8; 32]) {
         for i in 0..32 {
             for j in 0..8 {
@@ -237,8 +255,10 @@ impl Poly {
     }
 }
 
+/// A vector of K polynomials
 #[derive(Clone, Debug, Zeroize, ZeroizeOnDrop)]
 pub struct PolyVec<const K: usize> {
+    /// Array of K polynomials
     pub vec: [Poly; K],
 }
 
@@ -251,10 +271,12 @@ impl<const K: usize> Default for PolyVec<K> {
 }
 
 impl<const K: usize> PolyVec<K> {
+    /// Create a new vector of zero polynomials
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Apply Barrett reduction to all polynomials
     #[inline(always)]
     pub fn reduce(&mut self) {
         for p in &mut self.vec {
@@ -262,6 +284,7 @@ impl<const K: usize> PolyVec<K> {
         }
     }
 
+    /// Add another polynomial vector to this one in place
     #[inline(always)]
     pub fn add_assign(&mut self, other: &PolyVec<K>) {
         for (a, b) in self.vec.iter_mut().zip(other.vec.iter()) {
@@ -269,6 +292,7 @@ impl<const K: usize> PolyVec<K> {
         }
     }
 
+    /// Deserialize from a byte array
     pub fn from_bytes(&mut self, bytes: &[u8]) {
         const POLYBYTES: usize = 384;
         for (i, p) in self.vec.iter_mut().enumerate() {
@@ -276,6 +300,7 @@ impl<const K: usize> PolyVec<K> {
         }
     }
 
+    /// Serialize to a byte array
     pub fn to_bytes_into(&self, out: &mut [u8]) {
         for (i, p) in self.vec.iter().enumerate() {
             out[i * 384..(i + 1) * 384].copy_from_slice(&p.to_bytes());
@@ -283,6 +308,9 @@ impl<const K: usize> PolyVec<K> {
     }
 }
 
+/// Polynomial vector with 2 polynomials
 pub type PolyVec2 = PolyVec<2>;
+/// Polynomial vector with 3 polynomials
 pub type PolyVec3 = PolyVec<3>;
+/// Polynomial vector with 4 polynomials
 pub type PolyVec4 = PolyVec<4>;

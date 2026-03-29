@@ -1,16 +1,21 @@
 //! Cryptographically secure random number generator trait for no_std environments
 
+/// Trait for cryptographically secure random number generators
 pub trait CryptoRng {
+    /// Fill the destination buffer with random bytes
     fn fill_bytes(&mut self, dest: &mut [u8]);
     
+    /// Try to fill the destination buffer with random bytes
     fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
         self.fill_bytes(dest);
         Ok(())
     }
 }
 
+/// Error type for random number generation failures
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
+    /// Random number generation error
     RngError,
 }
 
@@ -19,11 +24,13 @@ mod std_rng {
     use super::CryptoRng;
     use rand::RngCore;
     
+    /// Standard random number generator wrapper using rand crate
     pub struct StdRng {
         inner: rand::rngs::ThreadRng,
     }
     
     impl StdRng {
+        /// Create a new standard RNG instance
         pub fn new() -> Self {
             Self {
                 inner: rand::thread_rng(),
@@ -47,12 +54,16 @@ mod std_rng {
 #[cfg(feature = "std")]
 pub use std_rng::StdRng;
 
+/// Fixed RNG for testing purposes - produces deterministic output
 pub struct FixedRng {
+    /// Fixed data buffer
     pub data: [u8; 64],
+    /// Current position in the buffer
     pub pos: usize,
 }
 
 impl FixedRng {
+    /// Create a new fixed RNG with the given data
     pub fn new(data: [u8; 64]) -> Self {
         Self { data, pos: 0 }
     }

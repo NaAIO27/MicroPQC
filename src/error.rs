@@ -1,12 +1,19 @@
 //! Error types for MicroPQC
 
+/// Error type for Kyber operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
+    /// Invalid input data provided
     InvalidInput,
+    /// Invalid public key format or value
     InvalidPublicKey,
+    /// Invalid secret key format or value
     InvalidSecretKey,
+    /// Invalid ciphertext format or value
     InvalidCiphertext,
+    /// Decapsulation failed - ciphertext may be corrupted
     DecapsulationFailed,
+    /// Random number generation error
     RandomError,
 }
 

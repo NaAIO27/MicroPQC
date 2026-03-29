@@ -1,8 +1,9 @@
 //! Number Theoretic Transform (NTT) operations for Kyber
 
-use crate::{KYBER_N, montgomery_reduce, barrett_reduce};
+use crate::{montgomery_reduce, barrett_reduce};
 use crate::poly::Poly;
 
+/// Precomputed twiddle factors for forward NTT
 pub const ZETAS: [i32; 128] = [
     -1044, -758, -359, -1517, 1493, 1422, 287, 202,
     -171, 622, 1577, 182, 962, -1202, -1474, 1468,
@@ -22,6 +23,7 @@ pub const ZETAS: [i32; 128] = [
     -889, -877, -865, -853, -841, -829, -817, -805,
 ];
 
+/// Precomputed twiddle factors for inverse NTT
 pub const ZETAS_INV: [i32; 128] = [
     1701, 1807, 1460, 2371, 2338, 2344, 1840, 1867,
     1787, 1833, 2520, 1520, 1839, 2500, 2519, 2481,
@@ -54,6 +56,9 @@ fn fqmul_i16(a: i16, b: i32) -> i16 {
 }
 
 impl Poly {
+    /// Compute the Number Theoretic Transform (NTT) in place
+    /// 
+    /// Transforms the polynomial to the NTT domain for efficient multiplication
     pub fn ntt(&mut self) {
         let mut len = 128;
         let mut k = 1;
@@ -75,6 +80,9 @@ impl Poly {
         }
     }
 
+    /// Compute the inverse NTT and multiply by Montgomery factor
+    /// 
+    /// Transforms the polynomial back from NTT domain
     pub fn invntt_tomont(&mut self) {
         let mut len = 2;
         let mut k = 0;
@@ -98,11 +106,14 @@ impl Poly {
         }
 
         const F: i32 = 1441;
-        for j in 0..256 {
-            self.coeffs[j] = fqmul_i16(self.coeffs[j], F);
+        for coeff in self.coeffs.iter_mut() {
+            *coeff = fqmul_i16(*coeff, F);
         }
     }
 
+    /// Multiply two polynomials in NTT domain
+    /// 
+    /// Returns the product of self and other in NTT domain
     pub fn basemul(&self, other: &Poly, zeta: i32) -> Poly {
         let mut result = Poly::new();
         
@@ -127,10 +138,11 @@ impl Poly {
     }
 }
 
+/// Multiply and accumulate polynomial vectors in NTT domain
+/// 
+/// Computes a = sum(pv1[i] * pv2[i]) for all i
 pub fn polyvec_basemul_acc_montgomery<const K: usize>(a: &mut Poly, pv1: &[Poly; K], pv2: &[Poly; K]) {
-    for i in 0..KYBER_N {
-        a.coeffs[i] = 0;
-    }
+    a.coeffs.fill(0);
     
     for (p1, p2) in pv1.iter().zip(pv2.iter()) {
         let zeta = ZETAS[64];
