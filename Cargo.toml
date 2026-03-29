@@ -1,0 +1,31 @@
+[package]
+name = "micropqc"
+version = "0.1.0"
+edition = "2021"
+authors = ["MicroPQC Team"]
+description = "A no_std compatible Post-Quantum Cryptography library for embedded systems"
+license = "MIT OR Apache-2.0"
+keywords = ["cryptography", "post-quantum", "kyber", "kem", "embedded"]
+categories = ["cryptography", "embedded", "no-std"]
+readme = "README.md"
+
+[dependencies]
+zeroize = { version = "1.8", default-features = false, features = ["derive"] }
+
+[dev-dependencies]
+rand = "0.8"
+
+[features]
+default = ["kyber512"]
+kyber512 = []
+kyber768 = []
+kyber1024 = []
+std = []
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
