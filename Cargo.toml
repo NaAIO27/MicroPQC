@@ -11,6 +11,7 @@ readme = "README.md"
 
 [dependencies]
 zeroize = { version = "1.8", default-features = false, features = ["derive"] }
+tiny-keccak = { version = "2.0", default-features = false, features = ["keccak", "shake"] }
 
 [dev-dependencies]
 rand = "0.8"

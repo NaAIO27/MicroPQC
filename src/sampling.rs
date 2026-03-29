@@ -2,6 +2,7 @@
 
 use crate::KYBER_N;
 use crate::poly::Poly;
+use tiny_keccak::{Hasher, Keccak};
 
 #[inline(always)]
 fn load24(x: &[u8]) -> u32 {
@@ -121,97 +122,48 @@ fn xof(out: &mut [u8], seed: &[u8], nonce: u8) {
     shake256(out, &ext_seed);
 }
 
-/// SHAKE256 extendable output function (placeholder implementation)
+/// SHAKE256 extendable output function
 /// 
-/// Note: This is a simplified implementation for demonstration purposes.
-/// A production implementation should use a proper SHAKE256 implementation.
+/// Implementation using tiny-keccak library for cryptographic security.
+/// 
+/// # Safety
+/// 
+/// This function will panic if `out` is empty. For security,
+/// ensure the output buffer has sufficient length for your use case.
+/// 
+/// # Examples
+/// 
+/// ```
+/// use micropqc::sampling::shake256;
+/// 
+/// let mut output = [0u8; 32];
+/// shake256(&mut output, b"input data");
+/// ```
 pub fn shake256(out: &mut [u8], in_: &[u8]) {
-    #[cfg(feature = "std")]
-    {
-        use std::collections::hash_map::DefaultHasher;
-        use core::hash::{Hash, Hasher};
-        
-        let mut hasher = DefaultHasher::new();
-        in_.hash(&mut hasher);
-        let hash = hasher.finish();
-        
-        let hash_bytes = hash.to_le_bytes();
-        let mut state = [0u8; 32];
-        state[..8].copy_from_slice(&hash_bytes);
-        
-        for (i, byte) in out.iter_mut().enumerate() {
-            *byte = state[i % 32].wrapping_add(i as u8);
-        }
-    }
+    assert!(!out.is_empty(), "SHAKE256 output buffer must not be empty");
     
-    #[cfg(not(feature = "std"))]
-    {
-        for (i, byte) in out.iter_mut().enumerate() {
-            *byte = in_.get(i % in_.len()).copied().unwrap_or(0).wrapping_add(i as u8);
-        }
-    }
+    use tiny_keccak::Shake;
+    let mut shake = Shake::v256();
+    shake.update(in_);
+    shake.finalize(out);
 }
 
-/// SHA3-256 hash function (placeholder implementation)
+/// SHA3-256 hash function
 /// 
-/// Note: This is a simplified implementation for demonstration purposes.
-/// A production implementation should use a proper SHA3-256 implementation.
+/// Implementation using tiny-keccak library for cryptographic security
 pub fn sha3_256(out: &mut [u8; 32], in_: &[u8]) {
-    #[cfg(feature = "std")]
-    {
-        use std::collections::hash_map::DefaultHasher;
-        use core::hash::{Hash, Hasher};
-        
-        let mut hasher = DefaultHasher::new();
-        in_.hash(&mut hasher);
-        let hash = hasher.finish().to_le_bytes();
-        
-        for (i, byte) in out.iter_mut().enumerate() {
-            *byte = hash[i % 8].wrapping_add((i / 8) as u8);
-        }
-    }
-    
-    #[cfg(not(feature = "std"))]
-    {
-        for (i, byte) in out.iter_mut().enumerate() {
-            *byte = in_.get(i % in_.len()).copied().unwrap_or(0);
-        }
-    }
+    let mut keccak = Keccak::v256();
+    keccak.update(in_);
+    keccak.finalize(out);
 }
 
-/// SHA3-512 hash function (placeholder implementation)
+/// SHA3-512 hash function
 /// 
-/// Note: This is a simplified implementation for demonstration purposes.
-/// A production implementation should use a proper SHA3-512 implementation.
+/// Implementation using tiny-keccak library for cryptographic security
 pub fn sha3_512(out: &mut [u8; 64], in_: &[u8]) {
-    #[cfg(feature = "std")]
-    {
-        use std::collections::hash_map::DefaultHasher;
-        use core::hash::{Hash, Hasher};
-        
-        let mut hasher1 = DefaultHasher::new();
-        let mut hasher2 = DefaultHasher::new();
-        
-        in_.hash(&mut hasher1);
-        in_.hash(&mut hasher2);
-        
-        let hash1 = hasher1.finish().to_le_bytes();
-        let hash2 = hasher2.finish().to_le_bytes();
-        
-        out[..8].copy_from_slice(&hash1);
-        out[8..16].copy_from_slice(&hash2);
-        
-        for i in 16..64 {
-            out[i] = out[i % 16].wrapping_add(i as u8);
-        }
-    }
-    
-    #[cfg(not(feature = "std"))]
-    {
-        for (i, byte) in out.iter_mut().enumerate() {
-            *byte = in_.get(i % in_.len()).copied().unwrap_or(0);
-        }
-    }
+    let mut keccak = Keccak::v512();
+    keccak.update(in_);
+    keccak.finalize(out);
 }
 
 /// Key derivation function using SHAKE256
