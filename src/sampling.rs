@@ -126,10 +126,11 @@ fn xof(out: &mut [u8], seed: &[u8], nonce: u8) {
 /// 
 /// Implementation using tiny-keccak library for cryptographic security.
 /// 
-/// # Safety
+/// # Panics
 /// 
-/// This function will panic if `out` is empty. For security,
-/// ensure the output buffer has sufficient length for your use case.
+/// This function will panic if `out` is less than 32 bytes.
+/// SHAKE256 has a security strength of 256 bits, so outputs smaller
+/// than 32 bytes would compromise cryptographic security.
 /// 
 /// # Examples
 /// 
@@ -140,7 +141,7 @@ fn xof(out: &mut [u8], seed: &[u8], nonce: u8) {
 /// shake256(&mut output, b"input data");
 /// ```
 pub fn shake256(out: &mut [u8], in_: &[u8]) {
-    assert!(!out.is_empty(), "SHAKE256 output buffer must not be empty");
+    assert!(out.len() >= 32, "SHAKE256 output buffer must be at least 32 bytes for security, got {}", out.len());
     
     use tiny_keccak::Shake;
     let mut shake = Shake::v256();
