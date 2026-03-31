@@ -2,6 +2,7 @@
 
 use crate::{KYBER_N, KYBER_Q};
 use crate::{barrett_reduce, freeze};
+use crate::error::Error;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A polynomial with coefficients in Z_q.
@@ -60,8 +61,10 @@ impl Poly {
 
     /// Deserialize a polynomial from a byte array (384 bytes)
     #[inline(always)]
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        debug_assert_eq!(bytes.len(), 384);
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        if bytes.len() != 384 {
+            return Err(Error::InvalidInput);
+        }
         let mut p = Self::new();
         
         for i in 0..KYBER_N / 2 {
@@ -72,7 +75,7 @@ impl Poly {
             p.coeffs[2 * i] = ((b0 >> 0) | (b1 << 8)) & 0xFFF;
             p.coeffs[2 * i + 1] = ((b1 >> 4) | (b2 << 4)) & 0xFFF;
         }
-        p
+        Ok(p)
     }
 
     /// Serialize the polynomial to a byte array (384 bytes)
@@ -93,17 +96,20 @@ impl Poly {
 
     /// Compress the polynomial using d bits per coefficient
     /// 
-    /// Returns a byte array of 128 bytes containing the compressed coefficients.
-    pub fn compress(&self, d: u32) -> [u8; 128] {
-        let mut bytes = [0u8; 128];
+    /// Returns a byte array containing the compressed coefficients.
+    /// The actual size depends on d: 128 bytes for d=4, 160 for d=5, 320 for d=10, 352 for d=11.
+    pub fn compress(&self, d: u32) -> Result<[u8; 352], Error> {
+        let mut bytes = [0u8; 352];
         let shift = 1i64 << d;
         
         match d {
             4 => {
                 for i in 0..KYBER_N / 2 {
-                    let t0 = (((self.coeffs[2 * i] as i64) * shift + KYBER_Q as i64 / 2) / KYBER_Q as i64) as u8 & 0xF;
-                    let t1 = (((self.coeffs[2 * i + 1] as i64) * shift + KYBER_Q as i64 / 2) / KYBER_Q as i64) as u8 & 0xF;
-                    bytes[i] = t0 | (t1 << 4);
+                    let mut t0 = self.coeffs[2 * i] as i64;
+                    let mut t1 = self.coeffs[2 * i + 1] as i64;
+                    t0 = ((t0 * shift + KYBER_Q as i64 / 2) / KYBER_Q as i64) & ((shift - 1) as i64);
+                    t1 = ((t1 * shift + KYBER_Q as i64 / 2) / KYBER_Q as i64) & ((shift - 1) as i64);
+                    bytes[i] = (t0 | (t1 << 4)) as u8;
                 }
             }
             5 => {
@@ -164,17 +170,21 @@ impl Poly {
                     bytes[11*i+10] = t7 as u8;
                 }
             }
-            _ => panic!("Unsupported compression level"),
+            _ => return Err(Error::InvalidInput),
         }
-        bytes
+        Ok(bytes)
     }
 
     /// Decompress a polynomial from a byte array using d bits per coefficient
-    pub fn decompress(&mut self, bytes: &[u8], d: u32) {
+    pub fn decompress(&mut self, bytes: &[u8], d: u32) -> Result<(), Error> {
         let shift = (1i64 << d) as i64;
         
         match d {
             4 => {
+                let required_len = KYBER_N / 2;
+                if bytes.len() < required_len {
+                    return Err(Error::InvalidInput);
+                }
                 for i in 0..KYBER_N / 2 {
                     let t = bytes[i];
                     self.coeffs[2 * i] = ((((t & 0xF) as i64) * KYBER_Q as i64 + shift / 2) / shift) as i16;
@@ -182,6 +192,10 @@ impl Poly {
                 }
             }
             5 => {
+                let required_len = 5 * KYBER_N / 8;
+                if bytes.len() < required_len {
+                    return Err(Error::InvalidInput);
+                }
                 let mut j = 0;
                 for i in (0..KYBER_N).step_by(8) {
                     let t = [bytes[j], bytes[j+1], bytes[j+2], bytes[j+3], bytes[j+4]];
@@ -197,6 +211,10 @@ impl Poly {
                 }
             }
             10 => {
+                let required_len = 5 * KYBER_N / 4;
+                if bytes.len() < required_len {
+                    return Err(Error::InvalidInput);
+                }
                 for i in 0..KYBER_N / 4 {
                     let t = [
                         bytes[5*i] as u16,
@@ -212,6 +230,10 @@ impl Poly {
                 }
             }
             11 => {
+                let required_len = 11 * KYBER_N / 8;
+                if bytes.len() < required_len {
+                    return Err(Error::InvalidInput);
+                }
                 for i in 0..KYBER_N / 8 {
                     let t: [u16; 11] = [
                         bytes[11*i] as u16, bytes[11*i+1] as u16, bytes[11*i+2] as u16,
@@ -229,8 +251,9 @@ impl Poly {
                     self.coeffs[8*i+7] = ((((t[9] >> 5) | (t[10] << 3)) as i64 * KYBER_Q as i64 + 1024) >> 11) as i16;
                 }
             }
-            _ => panic!("Unsupported decompression level"),
+            _ => return Err(Error::InvalidInput),
         }
+        Ok(())
     }
 
     /// Convert a message to polynomial representation
@@ -252,6 +275,25 @@ impl Poly {
                 self.coeffs[8 * i + j] = mask & ((KYBER_Q + 1) / 2) as i16;
             }
         }
+    }
+    
+    /// Extract a 32-byte message from the polynomial coefficients
+    /// 
+    /// Each coefficient is decoded to a bit: 1 if closer to (q+1)/2, 0 if closer to 0
+    pub fn extract_msg(&self) -> [u8; 32] {
+        let mut msg = [0u8; 32];
+        for i in 0..32 {
+            let mut b = 0u8;
+            for j in 0..8 {
+                let mut t = self.coeffs[8 * i + j] as i32;
+                t = ((t % KYBER_Q) + KYBER_Q) % KYBER_Q;
+                if t > (KYBER_Q - 1) / 2 {
+                    b |= 1 << j;
+                }
+            }
+            msg[i] = b;
+        }
+        msg
     }
 }
 
@@ -293,11 +335,16 @@ impl<const K: usize> PolyVec<K> {
     }
 
     /// Deserialize from a byte array
-    pub fn from_bytes(&mut self, bytes: &[u8]) {
+    pub fn from_bytes(&mut self, bytes: &[u8]) -> Result<(), Error> {
         const POLYBYTES: usize = 384;
-        for (i, p) in self.vec.iter_mut().enumerate() {
-            *p = Poly::from_bytes(&bytes[i * POLYBYTES..(i + 1) * POLYBYTES]);
+        let required_len = K * POLYBYTES;
+        if bytes.len() < required_len {
+            return Err(Error::InvalidInput);
         }
+        for (i, p) in self.vec.iter_mut().enumerate() {
+            *p = Poly::from_bytes(&bytes[i * POLYBYTES..(i + 1) * POLYBYTES])?;
+        }
+        Ok(())
     }
 
     /// Serialize to a byte array

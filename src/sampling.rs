@@ -60,6 +60,9 @@ impl Poly {
     }
 
     /// Generate noise polynomial from seed with specified eta
+    /// 
+    /// Supported eta values: 2, 3
+    /// Invalid eta values are silently ignored (no noise added)
     pub fn get_noise_eta1(&mut self, eta: u32, seed: &[u8], nonce: u8) {
         match eta {
             2 => {
@@ -72,7 +75,9 @@ impl Poly {
                 prf(&mut buf, seed, nonce);
                 self.cbd_eta3(&buf);
             }
-            _ => panic!("Unsupported eta value"),
+            _ => {
+                debug_assert!(false, "Unsupported eta value: {}", eta);
+            }
         }
     }
 

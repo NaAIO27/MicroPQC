@@ -3,33 +3,24 @@
 use crate::params::KyberParams;
 use crate::poly::{Poly, PolyVec};
 use crate::ntt::polyvec_basemul_acc_montgomery;
-use crate::sampling::{sha3_256, sha3_512, kdf};
+use crate::sampling::{sha3_256, sha3_512, kdf, shake256};
 use crate::random::CryptoRng;
 use crate::error::Error;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
-/// Trait defining a Key Encapsulation Mechanism
 pub trait Kem {
-    /// Public key type
     type PublicKey: AsRef<[u8]>;
-    /// Secret key type (must support zeroization)
     type SecretKey: AsRef<[u8]> + Zeroize;
-    /// Ciphertext type
     type Ciphertext: AsRef<[u8]>;
-    /// Shared secret type
-    
     type SharedSecret: AsRef<[u8]>;
     
-    /// Generate a keypair
     fn keypair<R: CryptoRng>(rng: &mut R) -> Result<(Self::PublicKey, Self::SecretKey), Error>;
     
-    /// Encapsulate to produce a ciphertext and shared secret
     fn encapsulate<R: CryptoRng>(
         rng: &mut R,
         pk: &Self::PublicKey,
     ) -> Result<(Self::Ciphertext, Self::SharedSecret), Error>;
     
-    /// Decapsulate a ciphertext to recover the shared secret
     fn decapsulate(
         ct: &Self::Ciphertext,
         sk: &Self::SecretKey,
@@ -38,12 +29,11 @@ pub trait Kem {
 
 macro_rules! impl_kyber {
     ($name:ident, $params:ty, $k:expr, $pk_size:expr, $sk_size:expr, $ct_size:expr) => {
-        /// Kyber KEM implementation
         pub struct $name;
         
         impl Kem for $name {
             type PublicKey = KyberPublicKey<$pk_size>;
-            type SecretKey = KyberSecretKey<$sk_size>;
+            type SecretKey = KyberSecretKey<{ $sk_size + $pk_size + 64 }>;
             type Ciphertext = KyberCiphertext<$ct_size>;
             type SharedSecret = KyberSharedSecret;
             
@@ -51,8 +41,11 @@ macro_rules! impl_kyber {
                 let mut seed = [0u8; 32];
                 rng.fill_bytes(&mut seed);
                 
+                let mut z = [0u8; 32];
+                rng.fill_bytes(&mut z);
+                
                 let mut publickey = KyberPublicKey::<$pk_size>::default();
-                let mut secretkey = KyberSecretKey::<$sk_size>::default();
+                let mut secretkey = KyberSecretKey::<{ $sk_size + $pk_size + 64 }>::default();
                 
                 let mut buf = [0u8; 64];
                 sha3_512(&mut buf, &seed);
@@ -98,6 +91,18 @@ macro_rules! impl_kyber {
                 skpv.to_bytes_into(&mut sk_bytes);
                 secretkey.bytes[..sk_bytes.len()].copy_from_slice(&sk_bytes);
                 
+                secretkey.bytes[$sk_size..$sk_size + $pk_size].copy_from_slice(&publickey.bytes);
+                
+                let mut pk_hash = [0u8; 32];
+                sha3_256(&mut pk_hash, &publickey.bytes);
+                secretkey.bytes[$sk_size + $pk_size..$sk_size + $pk_size + 32].copy_from_slice(&pk_hash);
+                
+                secretkey.bytes[$sk_size + $pk_size + 32..].copy_from_slice(&z);
+                
+                buf.zeroize();
+                seed.zeroize();
+                z.zeroize();
+                
                 Ok((publickey, secretkey))
             }
             
@@ -105,23 +110,21 @@ macro_rules! impl_kyber {
                 rng: &mut R,
                 pk: &Self::PublicKey,
             ) -> Result<(Self::Ciphertext, Self::SharedSecret), Error> {
-                let mut buf = [0u8; 32];
-                rng.fill_bytes(&mut buf);
+                let mut m = [0u8; 32];
+                rng.fill_bytes(&mut m);
                 
                 let mut h = [0u8; 32];
                 sha3_256(&mut h, pk.as_ref());
                 
                 let mut combined = [0u8; 64];
-                combined[..32].copy_from_slice(&buf);
+                combined[..32].copy_from_slice(&m);
                 combined[32..].copy_from_slice(&h);
                 
                 let mut kr = [0u8; 64];
                 sha3_512(&mut kr, &combined);
                 
-                let mut shared_secret = KyberSharedSecret::default();
-                shared_secret.bytes.copy_from_slice(&kr[..32]);
-                
-                let mut ct = KyberCiphertext::<$ct_size>::default();
+                let k = &kr[..32];
+                let r = &kr[32..];
                 
                 let pk_bytes = pk.as_ref();
                 let publicseed = &pk_bytes[$k * 384..$k * 384 + 32];
@@ -133,13 +136,13 @@ macro_rules! impl_kyber {
                 
                 let mut sp = PolyVec::<$k>::new();
                 for i in 0..$k {
-                    sp.vec[i].get_noise_eta1(<$params>::ETA2, &kr[32..], i as u8);
+                    sp.vec[i].get_noise_eta1(<$params>::ETA2, r, i as u8);
                     sp.vec[i].ntt();
                 }
                 
                 let mut ep = PolyVec::<$k>::new();
                 for i in 0..$k {
-                    ep.vec[i].get_noise_eta1(<$params>::ETA2, &kr[32..], ($k + i) as u8);
+                    ep.vec[i].get_noise_eta1(<$params>::ETA2, r, ($k + i) as u8);
                     ep.vec[i].ntt();
                 }
                 
@@ -151,7 +154,7 @@ macro_rules! impl_kyber {
                 }
                 
                 let mut pkpv = PolyVec::<$k>::new();
-                pkpv.from_bytes(&pk_bytes[..$k * 384]);
+                pkpv.from_bytes(&pk_bytes[..$k * 384])?;
                 
                 let mut v = Poly::new();
                 polyvec_basemul_acc_montgomery(&mut v, &pkpv.vec, &sp.vec);
@@ -159,25 +162,34 @@ macro_rules! impl_kyber {
                 v.reduce();
                 
                 let mut epp = Poly::new();
-                epp.get_noise_eta1(<$params>::ETA2, &kr[32..], (2 * $k) as u8);
+                epp.get_noise_eta1(<$params>::ETA2, r, (2 * $k) as u8);
                 v.add_assign(&epp);
+                
+                let mut mp = Poly::new();
+                mp.from_msg(&m);
+                v.add_assign(&mp);
+                v.reduce();
                 
                 for i in 0..$k {
                     bp.vec[i].invntt_tomont();
                     bp.vec[i].reduce();
                 }
                 
+                let mut ct = KyberCiphertext::<$ct_size>::default();
                 let mut offset = 0;
                 for i in 0..$k {
-                    let compressed = bp.vec[i].compress(<$params>::DU);
+                    let compressed = bp.vec[i].compress(<$params>::DU)?;
                     let len = (<$params>::POLYCOMPRESSEDBYTES_DU);
                     ct.bytes[offset..offset + len].copy_from_slice(&compressed[..len]);
                     offset += len;
                 }
                 
-                let v_compressed = v.compress(<$params>::DV);
+                let v_compressed = v.compress(<$params>::DV)?;
                 let v_len = <$params>::POLYCOMPRESSEDBYTES_DV;
                 ct.bytes[offset..offset + v_len].copy_from_slice(&v_compressed[..v_len]);
+                
+                let mut shared_secret = KyberSharedSecret::default();
+                shared_secret.bytes.copy_from_slice(k);
                 
                 Ok((ct, shared_secret))
             }
@@ -186,20 +198,35 @@ macro_rules! impl_kyber {
                 ct: &Self::Ciphertext,
                 sk: &Self::SecretKey,
             ) -> Result<Self::SharedSecret, Error> {
+                let sk_bytes = sk.as_ref();
+                
                 let mut skpv = PolyVec::<$k>::new();
-                skpv.from_bytes(&sk.as_ref()[..$k * 384]);
+                skpv.from_bytes(&sk_bytes[..$k * 384])?;
+                
+                for i in 0..$k {
+                    skpv.vec[i].ntt();
+                }
+                
+                let pk_offset = $sk_size;
+                let pk_bytes = &sk_bytes[pk_offset..pk_offset + $pk_size];
+                
+                let pk_hash_offset = pk_offset + $pk_size;
+                let pk_hash = &sk_bytes[pk_hash_offset..pk_hash_offset + 32];
+                
+                let z_offset = pk_hash_offset + 32;
+                let z = &sk_bytes[z_offset..z_offset + 32];
                 
                 let mut bp = PolyVec::<$k>::new();
                 let mut offset = 0;
                 for i in 0..$k {
                     let len = <$params>::POLYCOMPRESSEDBYTES_DU;
-                    bp.vec[i].decompress(&ct.as_ref()[offset..offset + len], <$params>::DU);
+                    bp.vec[i].decompress(&ct.as_ref()[offset..offset + len], <$params>::DU)?;
                     offset += len;
                 }
                 
                 let mut v = Poly::new();
                 let v_len = <$params>::POLYCOMPRESSEDBYTES_DV;
-                v.decompress(&ct.as_ref()[offset..offset + v_len], <$params>::DV);
+                v.decompress(&ct.as_ref()[offset..offset + v_len], <$params>::DV)?;
                 
                 for i in 0..$k {
                     bp.vec[i].ntt();
@@ -210,8 +237,102 @@ macro_rules! impl_kyber {
                 mp.invntt_tomont();
                 mp.reduce();
                 
+                v.sub_assign(&mp);
+                v.freeze();
+                
+                let mut m = v.extract_msg();
+                
+                let mut combined = [0u8; 64];
+                combined[..32].copy_from_slice(&m);
+                combined[32..].copy_from_slice(pk_hash);
+                
+                let mut kr = [0u8; 64];
+                sha3_512(&mut kr, &combined);
+                
+                let k = &kr[..32];
+                let r = &kr[32..];
+                
+                let publicseed = &pk_bytes[$k * 384..$k * 384 + 32];
+                
+                let mut a = PolyVec::<$k>::new();
+                for i in 0..$k {
+                    a.vec[i].uniform(publicseed, i as u8);
+                }
+                
+                let mut sp = PolyVec::<$k>::new();
+                for i in 0..$k {
+                    sp.vec[i].get_noise_eta1(<$params>::ETA2, r, i as u8);
+                    sp.vec[i].ntt();
+                }
+                
+                let mut ep = PolyVec::<$k>::new();
+                for i in 0..$k {
+                    ep.vec[i].get_noise_eta1(<$params>::ETA2, r, ($k + i) as u8);
+                    ep.vec[i].ntt();
+                }
+                
+                let mut bp_cmp = PolyVec::<$k>::new();
+                for i in 0..$k {
+                    polyvec_basemul_acc_montgomery(&mut bp_cmp.vec[i], &a.vec, &sp.vec);
+                    bp_cmp.vec[i].add_assign(&ep.vec[i]);
+                    bp_cmp.vec[i].reduce();
+                }
+                
+                let mut pkpv = PolyVec::<$k>::new();
+                pkpv.from_bytes(&pk_bytes[..$k * 384])?;
+                
+                let mut v_cmp = Poly::new();
+                polyvec_basemul_acc_montgomery(&mut v_cmp, &pkpv.vec, &sp.vec);
+                v_cmp.invntt_tomont();
+                v_cmp.reduce();
+                
+                let mut epp = Poly::new();
+                epp.get_noise_eta1(<$params>::ETA2, r, (2 * $k) as u8);
+                v_cmp.add_assign(&epp);
+                
+                let mut mp_cmp = Poly::new();
+                mp_cmp.from_msg(&m);
+                v_cmp.add_assign(&mp_cmp);
+                v_cmp.reduce();
+                
+                for i in 0..$k {
+                    bp_cmp.vec[i].invntt_tomont();
+                    bp_cmp.vec[i].reduce();
+                }
+                
+                let mut ct_cmp = [0u8; $ct_size];
+                let mut offset_cmp = 0;
+                for i in 0..$k {
+                    let compressed = bp_cmp.vec[i].compress(<$params>::DU)?;
+                    let len = (<$params>::POLYCOMPRESSEDBYTES_DU);
+                    ct_cmp[offset_cmp..offset_cmp + len].copy_from_slice(&compressed[..len]);
+                    offset_cmp += len;
+                }
+                
+                let v_compressed = v_cmp.compress(<$params>::DV)?;
+                let v_len = <$params>::POLYCOMPRESSEDBYTES_DV;
+                ct_cmp[offset_cmp..offset_cmp + v_len].copy_from_slice(&v_compressed[..v_len]);
+                
+                let ct_bytes = ct.as_ref();
+                let valid = ct_bytes.len() == $ct_size && 
+                    ct_bytes.iter().zip(ct_cmp.iter()).all(|(a, b)| a == b);
+                
                 let mut shared_secret = KyberSharedSecret::default();
-                kdf(&mut shared_secret.bytes, &mp.to_bytes());
+                
+                if valid {
+                    shared_secret.bytes.copy_from_slice(k);
+                } else {
+                    let mut buf = [0u8; 64];
+                    buf[..32].copy_from_slice(z);
+                    buf[32..].copy_from_slice(&ct_bytes[..32.min(ct_bytes.len())]);
+                    
+                    let mut fake_k = [0u8; 32];
+                    sha3_256(&mut fake_k, &buf);
+                    shared_secret.bytes.copy_from_slice(&fake_k);
+                }
+                
+                m.zeroize();
+                kr.zeroize();
                 
                 Ok(shared_secret)
             }
@@ -223,7 +344,6 @@ impl_kyber!(Kyber512, crate::params::Kyber512, 2, 800, 768, 768);
 impl_kyber!(Kyber768, crate::params::Kyber768, 3, 1184, 1152, 1088);
 impl_kyber!(Kyber1024, crate::params::Kyber1024, 4, 1568, 1536, 1568);
 
-/// Kyber public key of fixed size N bytes
 #[derive(Clone, Debug)]
 pub struct KyberPublicKey<const N: usize> {
     bytes: [u8; N],
@@ -241,7 +361,6 @@ impl<const N: usize> AsRef<[u8]> for KyberPublicKey<N> {
     }
 }
 
-/// Kyber secret key of fixed size N bytes (supports zeroization)
 #[derive(Clone, Debug, Zeroize, ZeroizeOnDrop)]
 pub struct KyberSecretKey<const N: usize> {
     bytes: [u8; N],
@@ -259,7 +378,6 @@ impl<const N: usize> AsRef<[u8]> for KyberSecretKey<N> {
     }
 }
 
-/// Kyber ciphertext of fixed size N bytes
 #[derive(Clone, Debug)]
 pub struct KyberCiphertext<const N: usize> {
     bytes: [u8; N],
@@ -277,7 +395,6 @@ impl<const N: usize> AsRef<[u8]> for KyberCiphertext<N> {
     }
 }
 
-/// Kyber shared secret (32 bytes, supports zeroization)
 #[derive(Clone, Debug, Zeroize, ZeroizeOnDrop)]
 pub struct KyberSharedSecret {
     bytes: [u8; 32],
@@ -305,5 +422,18 @@ mod tests {
         let mut rng = FixedRng::new([1u8; 64]);
         let result = Kyber512::keypair(&mut rng);
         assert!(result.is_ok());
+    }
+    
+    #[test]
+    fn test_kyber512_encapsulate_decapsulate() {
+        let mut rng = FixedRng::new([1u8; 64]);
+        let (pk, sk) = Kyber512::keypair(&mut rng).unwrap();
+        
+        let mut rng2 = FixedRng::new([2u8; 64]);
+        let (ct, ss1) = Kyber512::encapsulate(&mut rng2, &pk).unwrap();
+        
+        let ss2 = Kyber512::decapsulate(&ct, &sk).unwrap();
+        
+        assert_eq!(ss1.as_ref(), ss2.as_ref());
     }
 }

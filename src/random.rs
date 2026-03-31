@@ -55,6 +55,13 @@ mod std_rng {
 pub use std_rng::StdRng;
 
 /// Fixed RNG for testing purposes - produces deterministic output
+/// 
+/// # Security Warning
+/// 
+/// This RNG is **NOT** cryptographically secure and should **ONLY** be used
+/// for testing purposes. Using this in production will result in 
+/// complete compromise of cryptographic security.
+#[cfg(test)]
 pub struct FixedRng {
     /// Fixed data buffer
     pub data: [u8; 64],
@@ -62,6 +69,7 @@ pub struct FixedRng {
     pub pos: usize,
 }
 
+#[cfg(test)]
 impl FixedRng {
     /// Create a new fixed RNG with the given data
     pub fn new(data: [u8; 64]) -> Self {
@@ -69,6 +77,7 @@ impl FixedRng {
     }
 }
 
+#[cfg(test)]
 impl CryptoRng for FixedRng {
     fn fill_bytes(&mut self, dest: &mut [u8]) {
         for byte in dest.iter_mut() {
@@ -78,6 +87,7 @@ impl CryptoRng for FixedRng {
     }
 }
 
+#[cfg(test)]
 impl Default for FixedRng {
     fn default() -> Self {
         Self::new([0u8; 64])

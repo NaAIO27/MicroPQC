@@ -44,20 +44,20 @@ pub const KYBER_N: usize = 256;
 /// Prime modulus
 pub const KYBER_Q: i32 = 3329;
 
-pub(crate) const QINV: i32 = 62209;
+pub(crate) const QINV: i32 = 582639265;
 
 #[inline(always)]
 pub(crate) fn montgomery_reduce(a: i64) -> i32 {
-    let t = (a as i64).wrapping_mul(QINV as i64) as i32;
-    let t = (t as i64).wrapping_mul(KYBER_Q as i64) as i64;
-    ((a - t) >> 16) as i32
+    let t = (a as i32).wrapping_mul(QINV);
+    ((a - (t as i64).wrapping_mul(KYBER_Q as i64)) >> 32) as i32
 }
 
 #[inline(always)]
 pub(crate) fn barrett_reduce(a: i64) -> i32 {
     const V: i64 = 20159;
-    let t = (a * V) >> 26;
-    (a - t.wrapping_mul(KYBER_Q as i64)) as i32
+    const KYBER_Q_I64: i64 = 3329;
+    let t = ((a * V) + (1 << 25)) >> 26;
+    (a - t * KYBER_Q_I64) as i32
 }
 
 #[inline(always)]

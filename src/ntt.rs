@@ -1,6 +1,6 @@
 //! Number Theoretic Transform (NTT) operations for Kyber
 
-use crate::{montgomery_reduce, barrett_reduce};
+use crate::{montgomery_reduce, barrett_reduce, KYBER_N, KYBER_Q};
 use crate::poly::Poly;
 
 /// Precomputed twiddle factors for forward NTT
@@ -42,8 +42,6 @@ pub const ZETAS_INV: [i32; 128] = [
     2517, 2507, 2519, 2509, 2515, 2505, 2513, 2501,
     2519, 2503, 2517, 2507, 2519, 2509, 2515, 2505,
 ];
-
-const KYBER_Q: i32 = 3329;
 
 #[inline(always)]
 fn fqmul(a: i32, b: i32) -> i32 {
@@ -145,10 +143,38 @@ pub fn polyvec_basemul_acc_montgomery<const K: usize>(a: &mut Poly, pv1: &[Poly;
     a.coeffs.fill(0);
     
     for (p1, p2) in pv1.iter().zip(pv2.iter()) {
-        let zeta = ZETAS[64];
-        let tmp = p1.basemul(p2, zeta);
-        a.add_assign(&tmp);
+        for i in 0..KYBER_N / 4 {
+            let zeta = ZETAS[64 + i] as i32;
+            
+            let a0 = p1.coeffs[4 * i] as i32;
+            let a1 = p1.coeffs[4 * i + 1] as i32;
+            let b0 = p2.coeffs[4 * i] as i32;
+            let b1 = p2.coeffs[4 * i + 1] as i32;
+            
+            let t0 = fqmul(a0, b0);
+            let t1 = fqmul(a1, b1);
+            let t1z = fqmul(t1, zeta);
+            a.coeffs[4 * i] = a.coeffs[4 * i].wrapping_add((t0 + t1z) as i16);
+            
+            let t2 = fqmul(a0, b1);
+            let t3 = fqmul(a1, b0);
+            a.coeffs[4 * i + 1] = a.coeffs[4 * i + 1].wrapping_add((t2 - t3) as i16);
+            
+            let a2 = p1.coeffs[4 * i + 2] as i32;
+            let a3 = p1.coeffs[4 * i + 3] as i32;
+            let b2 = p2.coeffs[4 * i + 2] as i32;
+            let b3 = p2.coeffs[4 * i + 3] as i32;
+            
+            let t4 = fqmul(a2, b2);
+            let t5 = fqmul(a3, b3);
+            let t5z = fqmul(t5, -zeta);
+            a.coeffs[4 * i + 2] = a.coeffs[4 * i + 2].wrapping_add((t4 + t5z) as i16);
+            
+            let t6 = fqmul(a2, b3);
+            let t7 = fqmul(a3, b2);
+            a.coeffs[4 * i + 3] = a.coeffs[4 * i + 3].wrapping_add((t6 - t7) as i16);
+        }
     }
-    
+
     a.reduce();
 }
