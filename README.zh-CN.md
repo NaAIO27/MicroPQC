@@ -1,4 +1,4 @@
-# MicroPQC
+# RS-MicroPQC
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://blog.rust-lang.org/2021/10/21/Rust-1.56.0.html)
@@ -9,7 +9,7 @@
 
 ## 简介
 
-MicroPQC 是一个轻量级、安全的后量子密码学实现，专为资源受限的嵌入式设备优化。目前实现了 **Kyber**（NIST 标准化的密钥封装机制，ML-KEM）。
+RS-MicroPQC 是一个轻量级、安全的后量子密码学实现，专为资源受限的嵌入式设备优化。目前实现了 **Kyber**（NIST 标准化的密钥封装机制，ML-KEM）。
 
 ### 特性
 

@@ -4,7 +4,7 @@ use crate::{montgomery_reduce, barrett_reduce, KYBER_N, KYBER_Q};
 use crate::poly::Poly;
 
 /// Precomputed twiddle factors for forward NTT
-pub const ZETAS: [i32; 128] = [
+pub const ZETAS: [i16; 128] = [
     -1044, -758, -359, -1517, 1493, 1422, 287, 202,
     -171, 622, 1577, 182, 962, -1202, -1474, 1468,
     573, -1325, 264, 383, -829, 1458, -1602, -44,
@@ -24,7 +24,7 @@ pub const ZETAS: [i32; 128] = [
 ];
 
 /// Precomputed twiddle factors for inverse NTT
-pub const ZETAS_INV: [i32; 128] = [
+pub const ZETAS_INV: [i16; 128] = [
     1701, 1807, 1460, 2371, 2338, 2344, 1840, 1867,
     1787, 1833, 2520, 1520, 1839, 2500, 2519, 2481,
     2525, 2493, 2527, 2499, 2511, 2503, 2517, 2507,
@@ -44,13 +44,8 @@ pub const ZETAS_INV: [i32; 128] = [
 ];
 
 #[inline(always)]
-fn fqmul(a: i32, b: i32) -> i32 {
-    montgomery_reduce((a as i64) * (b as i64))
-}
-
-#[inline(always)]
-fn fqmul_i16(a: i16, b: i32) -> i16 {
-    montgomery_reduce((a as i64) * (b as i64)) as i16
+fn fqmul(a: i16, b: i16) -> i16 {
+    montgomery_reduce((a as i32) * (b as i32))
 }
 
 impl Poly {
@@ -68,9 +63,9 @@ impl Poly {
                 k += 1;
                 
                 for j in start..start + len {
-                    let t = fqmul(self.coeffs[j + len] as i32, zeta);
-                    self.coeffs[j + len] = ((self.coeffs[j] as i32 - t).rem_euclid(KYBER_Q)) as i16;
-                    self.coeffs[j] = ((self.coeffs[j] as i32 + t).rem_euclid(KYBER_Q)) as i16;
+                    let t = fqmul(self.coeffs[j + len], zeta);
+                    self.coeffs[j + len] = self.coeffs[j] - t;
+                    self.coeffs[j] = self.coeffs[j] + t;
                 }
                 start += 2 * len;
             }
@@ -92,45 +87,44 @@ impl Poly {
                 k += 1;
                 
                 for j in start..start + len {
-                    let t = self.coeffs[j] as i32;
-                    let sum = t + self.coeffs[j + len] as i32;
-                    self.coeffs[j] = barrett_reduce(sum as i64) as i16;
-                    let diff = self.coeffs[j + len] as i32 - t;
-                    self.coeffs[j + len] = fqmul_i16(diff as i16, zeta);
+                    let t = self.coeffs[j];
+                    self.coeffs[j] = barrett_reduce((t as i32) + (self.coeffs[j + len] as i32));
+                    self.coeffs[j + len] = self.coeffs[j + len] - t;
+                    self.coeffs[j + len] = fqmul(self.coeffs[j + len], zeta);
                 }
                 start += 2 * len;
             }
             len <<= 1;
         }
 
-        const F: i32 = 1441;
+        const F: i16 = 1441;
         for coeff in self.coeffs.iter_mut() {
-            *coeff = fqmul_i16(*coeff, F);
+            *coeff = fqmul(*coeff, F);
         }
     }
 
     /// Multiply two polynomials in NTT domain
     /// 
     /// Returns the product of self and other in NTT domain
-    pub fn basemul(&self, other: &Poly, zeta: i32) -> Poly {
+    pub fn basemul(&self, other: &Poly, zeta: i16) -> Poly {
         let mut result = Poly::new();
         
         for i in (0..256).step_by(4) {
-            let a0 = self.coeffs[i] as i64;
-            let a1 = self.coeffs[i + 1] as i64;
-            let b0 = other.coeffs[i] as i64;
-            let b1 = other.coeffs[i + 1] as i64;
+            let a0 = self.coeffs[i];
+            let a1 = self.coeffs[i + 1];
+            let b0 = other.coeffs[i];
+            let b1 = other.coeffs[i + 1];
             
-            result.coeffs[i] = barrett_reduce(a0 * b0 + a1 * b1 * (zeta as i64)) as i16;
-            result.coeffs[i + 1] = barrett_reduce(a0 * b1 + a1 * b0) as i16;
+            result.coeffs[i] = fqmul(a0, b0) + fqmul(fqmul(a1, b1), zeta);
+            result.coeffs[i + 1] = fqmul(a0, b1) + fqmul(a1, b0);
             
-            let a2 = self.coeffs[i + 2] as i64;
-            let a3 = self.coeffs[i + 3] as i64;
-            let b2 = other.coeffs[i + 2] as i64;
-            let b3 = other.coeffs[i + 3] as i64;
+            let a2 = self.coeffs[i + 2];
+            let a3 = self.coeffs[i + 3];
+            let b2 = other.coeffs[i + 2];
+            let b3 = other.coeffs[i + 3];
             
-            result.coeffs[i + 2] = barrett_reduce(a2 * b2 + a3 * b3 * (zeta as i64)) as i16;
-            result.coeffs[i + 3] = barrett_reduce(a2 * b3 + a3 * b2) as i16;
+            result.coeffs[i + 2] = fqmul(a2, b2) + fqmul(fqmul(a3, b3), -zeta);
+            result.coeffs[i + 3] = fqmul(a2, b3) + fqmul(a3, b2);
         }
         result
     }
@@ -144,35 +138,35 @@ pub fn polyvec_basemul_acc_montgomery<const K: usize>(a: &mut Poly, pv1: &[Poly;
     
     for (p1, p2) in pv1.iter().zip(pv2.iter()) {
         for i in 0..KYBER_N / 4 {
-            let zeta = ZETAS[64 + i] as i32;
+            let zeta = ZETAS[64 + i];
             
-            let a0 = p1.coeffs[4 * i] as i32;
-            let a1 = p1.coeffs[4 * i + 1] as i32;
-            let b0 = p2.coeffs[4 * i] as i32;
-            let b1 = p2.coeffs[4 * i + 1] as i32;
+            let a0 = p1.coeffs[4 * i];
+            let a1 = p1.coeffs[4 * i + 1];
+            let b0 = p2.coeffs[4 * i];
+            let b1 = p2.coeffs[4 * i + 1];
             
             let t0 = fqmul(a0, b0);
             let t1 = fqmul(a1, b1);
             let t1z = fqmul(t1, zeta);
-            a.coeffs[4 * i] = a.coeffs[4 * i].wrapping_add((t0 + t1z) as i16);
+            a.coeffs[4 * i] = a.coeffs[4 * i].wrapping_add(t0 + t1z);
             
             let t2 = fqmul(a0, b1);
             let t3 = fqmul(a1, b0);
-            a.coeffs[4 * i + 1] = a.coeffs[4 * i + 1].wrapping_add((t2 - t3) as i16);
+            a.coeffs[4 * i + 1] = a.coeffs[4 * i + 1].wrapping_add(t2 + t3);
             
-            let a2 = p1.coeffs[4 * i + 2] as i32;
-            let a3 = p1.coeffs[4 * i + 3] as i32;
-            let b2 = p2.coeffs[4 * i + 2] as i32;
-            let b3 = p2.coeffs[4 * i + 3] as i32;
+            let a2 = p1.coeffs[4 * i + 2];
+            let a3 = p1.coeffs[4 * i + 3];
+            let b2 = p2.coeffs[4 * i + 2];
+            let b3 = p2.coeffs[4 * i + 3];
             
             let t4 = fqmul(a2, b2);
             let t5 = fqmul(a3, b3);
             let t5z = fqmul(t5, -zeta);
-            a.coeffs[4 * i + 2] = a.coeffs[4 * i + 2].wrapping_add((t4 + t5z) as i16);
+            a.coeffs[4 * i + 2] = a.coeffs[4 * i + 2].wrapping_add(t4 + t5z);
             
             let t6 = fqmul(a2, b3);
             let t7 = fqmul(a3, b2);
-            a.coeffs[4 * i + 3] = a.coeffs[4 * i + 3].wrapping_add((t6 - t7) as i16);
+            a.coeffs[4 * i + 3] = a.coeffs[4 * i + 3].wrapping_add(t6 + t7);
         }
     }
 

@@ -31,7 +31,7 @@ impl Poly {
     #[inline(always)]
     pub fn reduce(&mut self) {
         for coeff in self.coeffs.iter_mut() {
-            *coeff = barrett_reduce(*coeff as i64) as i16;
+            *coeff = barrett_reduce(*coeff as i32);
         }
     }
 

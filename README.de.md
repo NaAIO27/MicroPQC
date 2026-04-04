@@ -1,4 +1,4 @@
-# MicroPQC
+# RS-MicroPQC
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://blog.rust-lang.org/2021/10/21/Rust-1.56.0.html)
@@ -9,7 +9,7 @@ Eine `no_std`-kompatible Post-Quantum-Kryptographie-Bibliothek fur eingebettete 
 
 ## Einfuhrung
 
-MicroPQC ist eine leichtgewichtige, sichere Implementierung von Post-Quantum-Kryptographie, optimiert fur ressourcenbeschrankte eingebettete Gerate. Derzeit wird **Kyber** implementiert (NIST-standardisierter Key Encapsulation Mechanism, ML-KEM).
+RS-MicroPQC ist eine leichtgewichtige, sichere Implementierung von Post-Quantum-Kryptographie, optimiert fur ressourcenbeschrankte eingebettete Gerate. Derzeit wird **Kyber** implementiert (NIST-standardisierter Key Encapsulation Mechanism, ML-KEM).
 
 ### Funktionen
 

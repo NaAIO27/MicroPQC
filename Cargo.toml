@@ -12,6 +12,7 @@ readme = "README.md"
 [dependencies]
 zeroize = { version = "1.8", default-features = false, features = ["derive"] }
 tiny-keccak = { version = "2.0", default-features = false, features = ["keccak", "shake"] }
+rand = { version = "0.8", default-features = false, optional = true }
 
 [dev-dependencies]
 rand = "0.8"
@@ -21,7 +22,7 @@ default = ["kyber512"]
 kyber512 = []
 kyber768 = []
 kyber1024 = []
-std = []
+std = ["rand/std", "rand/std_rng"]
 
 [profile.dev]
 opt-level = 1

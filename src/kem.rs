@@ -3,24 +3,32 @@
 use crate::params::KyberParams;
 use crate::poly::{Poly, PolyVec};
 use crate::ntt::polyvec_basemul_acc_montgomery;
-use crate::sampling::{sha3_256, sha3_512, kdf, shake256};
+use crate::sampling::{sha3_256, sha3_512};
 use crate::random::CryptoRng;
 use crate::error::Error;
-use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
+/// Trait for Key Encapsulation Mechanism (KEM) operations
 pub trait Kem {
+    /// Public key type
     type PublicKey: AsRef<[u8]>;
+    /// Secret key type with zeroization support
     type SecretKey: AsRef<[u8]> + Zeroize;
+    /// Ciphertext type
     type Ciphertext: AsRef<[u8]>;
+    /// Shared secret type
     type SharedSecret: AsRef<[u8]>;
     
+    /// Generate a key pair
     fn keypair<R: CryptoRng>(rng: &mut R) -> Result<(Self::PublicKey, Self::SecretKey), Error>;
     
+    /// Encapsulate a shared secret using a public key
     fn encapsulate<R: CryptoRng>(
         rng: &mut R,
         pk: &Self::PublicKey,
     ) -> Result<(Self::Ciphertext, Self::SharedSecret), Error>;
     
+    /// Decapsulate a ciphertext using a secret key
     fn decapsulate(
         ct: &Self::Ciphertext,
         sk: &Self::SecretKey,
@@ -29,6 +37,7 @@ pub trait Kem {
 
 macro_rules! impl_kyber {
     ($name:ident, $params:ty, $k:expr, $pk_size:expr, $sk_size:expr, $ct_size:expr) => {
+        /// Kyber KEM implementation
         pub struct $name;
         
         impl Kem for $name {
@@ -308,6 +317,7 @@ impl_kyber!(Kyber512, crate::params::Kyber512, 2, 800, 768, 768);
 impl_kyber!(Kyber768, crate::params::Kyber768, 3, 1184, 1152, 1088);
 impl_kyber!(Kyber1024, crate::params::Kyber1024, 4, 1568, 1536, 1568);
 
+/// Kyber public key
 #[derive(Clone, Debug)]
 pub struct KyberPublicKey<const N: usize> {
     bytes: [u8; N],
@@ -325,6 +335,7 @@ impl<const N: usize> AsRef<[u8]> for KyberPublicKey<N> {
     }
 }
 
+/// Kyber secret key with automatic zeroization
 #[derive(Clone, Debug, Zeroize, ZeroizeOnDrop)]
 pub struct KyberSecretKey<const N: usize> {
     bytes: [u8; N],
@@ -342,6 +353,7 @@ impl<const N: usize> AsRef<[u8]> for KyberSecretKey<N> {
     }
 }
 
+/// Kyber ciphertext
 #[derive(Clone, Debug)]
 pub struct KyberCiphertext<const N: usize> {
     bytes: [u8; N],
@@ -359,6 +371,7 @@ impl<const N: usize> AsRef<[u8]> for KyberCiphertext<N> {
     }
 }
 
+/// Kyber shared secret with automatic zeroization
 #[derive(Clone, Debug, Zeroize, ZeroizeOnDrop)]
 pub struct KyberSharedSecret {
     bytes: [u8; 32],
