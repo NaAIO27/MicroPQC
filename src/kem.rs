@@ -129,64 +129,10 @@ macro_rules! impl_kyber {
                 let pk_bytes = pk.as_ref();
                 let publicseed = &pk_bytes[$k * 384..$k * 384 + 32];
                 
-                let mut a = PolyVec::<$k>::new();
-                for i in 0..$k {
-                    a.vec[i].uniform(publicseed, i as u8);
-                }
-                
-                let mut sp = PolyVec::<$k>::new();
-                for i in 0..$k {
-                    sp.vec[i].get_noise_eta1(<$params>::ETA2, r, i as u8);
-                    sp.vec[i].ntt();
-                }
-                
-                let mut ep = PolyVec::<$k>::new();
-                for i in 0..$k {
-                    ep.vec[i].get_noise_eta1(<$params>::ETA2, r, ($k + i) as u8);
-                    ep.vec[i].ntt();
-                }
-                
-                let mut bp = PolyVec::<$k>::new();
-                for i in 0..$k {
-                    polyvec_basemul_acc_montgomery(&mut bp.vec[i], &a.vec, &sp.vec);
-                    bp.vec[i].add_assign(&ep.vec[i]);
-                    bp.vec[i].reduce();
-                }
-                
-                let mut pkpv = PolyVec::<$k>::new();
-                pkpv.from_bytes(&pk_bytes[..$k * 384])?;
-                
-                let mut v = Poly::new();
-                polyvec_basemul_acc_montgomery(&mut v, &pkpv.vec, &sp.vec);
-                v.invntt_tomont();
-                v.reduce();
-                
-                let mut epp = Poly::new();
-                epp.get_noise_eta1(<$params>::ETA2, r, (2 * $k) as u8);
-                v.add_assign(&epp);
-                
-                let mut mp = Poly::new();
-                mp.from_msg(&m);
-                v.add_assign(&mp);
-                v.reduce();
-                
-                for i in 0..$k {
-                    bp.vec[i].invntt_tomont();
-                    bp.vec[i].reduce();
-                }
+                let ct_bytes = compute_ciphertext::<$k, $ct_size, $params>(publicseed, r, &m, pk_bytes)?;
                 
                 let mut ct = KyberCiphertext::<$ct_size>::default();
-                let mut offset = 0;
-                for i in 0..$k {
-                    let compressed = bp.vec[i].compress(<$params>::DU)?;
-                    let len = (<$params>::POLYCOMPRESSEDBYTES_DU);
-                    ct.bytes[offset..offset + len].copy_from_slice(&compressed[..len]);
-                    offset += len;
-                }
-                
-                let v_compressed = v.compress(<$params>::DV)?;
-                let v_len = <$params>::POLYCOMPRESSEDBYTES_DV;
-                ct.bytes[offset..offset + v_len].copy_from_slice(&v_compressed[..v_len]);
+                ct.bytes.copy_from_slice(&ct_bytes);
                 
                 let mut shared_secret = KyberSharedSecret::default();
                 shared_secret.bytes.copy_from_slice(k);
@@ -254,64 +200,7 @@ macro_rules! impl_kyber {
                 
                 let publicseed = &pk_bytes[$k * 384..$k * 384 + 32];
                 
-                let mut a = PolyVec::<$k>::new();
-                for i in 0..$k {
-                    a.vec[i].uniform(publicseed, i as u8);
-                }
-                
-                let mut sp = PolyVec::<$k>::new();
-                for i in 0..$k {
-                    sp.vec[i].get_noise_eta1(<$params>::ETA2, r, i as u8);
-                    sp.vec[i].ntt();
-                }
-                
-                let mut ep = PolyVec::<$k>::new();
-                for i in 0..$k {
-                    ep.vec[i].get_noise_eta1(<$params>::ETA2, r, ($k + i) as u8);
-                    ep.vec[i].ntt();
-                }
-                
-                let mut bp_cmp = PolyVec::<$k>::new();
-                for i in 0..$k {
-                    polyvec_basemul_acc_montgomery(&mut bp_cmp.vec[i], &a.vec, &sp.vec);
-                    bp_cmp.vec[i].add_assign(&ep.vec[i]);
-                    bp_cmp.vec[i].reduce();
-                }
-                
-                let mut pkpv = PolyVec::<$k>::new();
-                pkpv.from_bytes(&pk_bytes[..$k * 384])?;
-                
-                let mut v_cmp = Poly::new();
-                polyvec_basemul_acc_montgomery(&mut v_cmp, &pkpv.vec, &sp.vec);
-                v_cmp.invntt_tomont();
-                v_cmp.reduce();
-                
-                let mut epp = Poly::new();
-                epp.get_noise_eta1(<$params>::ETA2, r, (2 * $k) as u8);
-                v_cmp.add_assign(&epp);
-                
-                let mut mp_cmp = Poly::new();
-                mp_cmp.from_msg(&m);
-                v_cmp.add_assign(&mp_cmp);
-                v_cmp.reduce();
-                
-                for i in 0..$k {
-                    bp_cmp.vec[i].invntt_tomont();
-                    bp_cmp.vec[i].reduce();
-                }
-                
-                let mut ct_cmp = [0u8; $ct_size];
-                let mut offset_cmp = 0;
-                for i in 0..$k {
-                    let compressed = bp_cmp.vec[i].compress(<$params>::DU)?;
-                    let len = (<$params>::POLYCOMPRESSEDBYTES_DU);
-                    ct_cmp[offset_cmp..offset_cmp + len].copy_from_slice(&compressed[..len]);
-                    offset_cmp += len;
-                }
-                
-                let v_compressed = v_cmp.compress(<$params>::DV)?;
-                let v_len = <$params>::POLYCOMPRESSEDBYTES_DV;
-                ct_cmp[offset_cmp..offset_cmp + v_len].copy_from_slice(&v_compressed[..v_len]);
+                let ct_cmp = compute_ciphertext::<$k, $ct_size, $params>(publicseed, r, &m, pk_bytes)?;
                 
                 let ct_bytes = ct.as_ref();
                 let valid = ct_bytes.len() == $ct_size && 
@@ -338,6 +227,74 @@ macro_rules! impl_kyber {
             }
         }
     };
+}
+
+fn compute_ciphertext<const K: usize, const CT_SIZE: usize, P: KyberParams>(
+    publicseed: &[u8],
+    r: &[u8],
+    m: &[u8; 32],
+    pk_bytes: &[u8],
+) -> Result<[u8; CT_SIZE], Error> {
+    let mut a = PolyVec::<K>::new();
+    for i in 0..K {
+        a.vec[i].uniform(publicseed, i as u8);
+    }
+    
+    let mut sp = PolyVec::<K>::new();
+    for i in 0..K {
+        sp.vec[i].get_noise_eta1(P::ETA2, r, i as u8);
+        sp.vec[i].ntt();
+    }
+    
+    let mut ep = PolyVec::<K>::new();
+    for i in 0..K {
+        ep.vec[i].get_noise_eta1(P::ETA2, r, (K + i) as u8);
+        ep.vec[i].ntt();
+    }
+    
+    let mut bp = PolyVec::<K>::new();
+    for i in 0..K {
+        polyvec_basemul_acc_montgomery(&mut bp.vec[i], &a.vec, &sp.vec);
+        bp.vec[i].add_assign(&ep.vec[i]);
+        bp.vec[i].reduce();
+    }
+    
+    let mut pkpv = PolyVec::<K>::new();
+    pkpv.from_bytes(&pk_bytes[..K * 384])?;
+    
+    let mut v = Poly::new();
+    polyvec_basemul_acc_montgomery(&mut v, &pkpv.vec, &sp.vec);
+    v.invntt_tomont();
+    v.reduce();
+    
+    let mut epp = Poly::new();
+    epp.get_noise_eta1(P::ETA2, r, (2 * K) as u8);
+    v.add_assign(&epp);
+    
+    let mut mp = Poly::new();
+    mp.from_msg(m);
+    v.add_assign(&mp);
+    v.reduce();
+    
+    for i in 0..K {
+        bp.vec[i].invntt_tomont();
+        bp.vec[i].reduce();
+    }
+    
+    let mut ct = [0u8; CT_SIZE];
+    let mut offset = 0;
+    for i in 0..K {
+        let compressed = bp.vec[i].compress(P::DU)?;
+        let len = P::POLYCOMPRESSEDBYTES_DU;
+        ct[offset..offset + len].copy_from_slice(&compressed[..len]);
+        offset += len;
+    }
+    
+    let v_compressed = v.compress(P::DV)?;
+    let v_len = P::POLYCOMPRESSEDBYTES_DV;
+    ct[offset..offset + v_len].copy_from_slice(&v_compressed[..v_len]);
+    
+    Ok(ct)
 }
 
 impl_kyber!(Kyber512, crate::params::Kyber512, 2, 800, 768, 768);
