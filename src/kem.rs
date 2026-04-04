@@ -235,6 +235,13 @@ fn compute_ciphertext<const K: usize, const CT_SIZE: usize, P: KyberParams>(
     m: &[u8; 32],
     pk_bytes: &[u8],
 ) -> Result<[u8; CT_SIZE], Error> {
+    if pk_bytes.len() < K * 384 {
+        return Err(Error::InvalidPublicKeyLength {
+            expected: K * 384,
+            actual: pk_bytes.len(),
+        });
+    }
+
     let mut a = PolyVec::<K>::new();
     for i in 0..K {
         a.vec[i].uniform(publicseed, i as u8);
@@ -259,10 +266,6 @@ fn compute_ciphertext<const K: usize, const CT_SIZE: usize, P: KyberParams>(
         bp.vec[i].reduce();
     }
     
-    if pk_bytes.len() < K * 384 {
-        return Err(Error::InvalidPublicKey);
-    }
-
     let mut pkpv = PolyVec::<K>::new();
     pkpv.from_bytes(&pk_bytes[..K * 384])?;
     
