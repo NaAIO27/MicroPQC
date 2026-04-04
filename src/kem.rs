@@ -259,6 +259,10 @@ fn compute_ciphertext<const K: usize, const CT_SIZE: usize, P: KyberParams>(
         bp.vec[i].reduce();
     }
     
+    if pk_bytes.len() < K * 384 {
+        return Err(Error::InvalidPublicKey);
+    }
+
     let mut pkpv = PolyVec::<K>::new();
     pkpv.from_bytes(&pk_bytes[..K * 384])?;
     
